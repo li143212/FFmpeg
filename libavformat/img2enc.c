@@ -21,6 +21,8 @@
  */
 
 #include <time.h>
+#include <unistd.h>
+#include <string.h>
 
 #include "config_components.h"
 
@@ -153,11 +155,45 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
     } else if (img->use_strftime) {
         time_t now0;
         struct tm *tm, tmpbuf;
+        int count = 0;
+        char base_filename[1024];
+        char *ext_ptr = NULL;
+        char format_buffer[1024];
+        const char *original_ext = NULL;
+        
         time(&now0);
         tm = localtime_r(&now0, &tmpbuf);
-        if (!strftime(filename, sizeof(filename), s->url, tm)) {
+        
+        if (!strftime(base_filename, sizeof(base_filename), s->url, tm)) {
             av_log(s, AV_LOG_ERROR, "Could not get frame filename with strftime\n");
             return AVERROR(EINVAL);
+        }
+
+        // 分离文件名和扩展名
+        ext_ptr = strrchr(base_filename, '.');
+        if (ext_ptr && (ext_ptr != base_filename)) {
+            original_ext = ext_ptr + 1; // 保存原始扩展名
+            *ext_ptr = '\0'; // 临时截断
+            snprintf(format_buffer, sizeof(format_buffer), "%%s-%%03d.%%s");
+        } else {
+            snprintf(format_buffer, sizeof(format_buffer), "%%s-%%03d.jpg");
+        }
+
+        // 检查文件是否存在并添加序号
+        do {
+            if (original_ext) {
+                snprintf(filename, sizeof(filename), format_buffer, 
+                        base_filename, count, original_ext);
+            } else {
+                snprintf(filename, sizeof(filename), format_buffer,
+                        base_filename, count);
+            }
+            count++;
+        } while (access(filename, F_OK) == 0 && count < 1000);
+
+        // 恢复原始字符串
+        if (ext_ptr && (ext_ptr != base_filename)) {
+            *ext_ptr = '.';
         }
     } else if (img->frame_pts) {
         if (ff_get_frame_filename(filename, sizeof(filename), s->url, pkt->pts, AV_FRAME_FILENAME_FLAGS_MULTIPLE) < 0) {
